@@ -3,12 +3,17 @@ from aws_cdk import (
     Stack,
     aws_ec2 as ec2,
     aws_ecs as ecs,
-    aws_ecs_patterns as ecs_patterns,
-    aws_rds as rds,
-    aws_secretsmanager as secretsmanager,
+    aws_ecr as ecr,
+    aws_elasticloadbalancingv2 as elb,
+    # aws_ecs_patterns as ecs_patterns,
+    aws_secretsmanager as asm,
+    aws_iam as iam,
     CfnOutput,
 )
+import aws_cdk
 from constructs import Construct
+from cdklab.ecs_component import EcsComponents
+from cdklab.rds_component import RDSComponent
 
 class LabDeployStack(Stack):
 
@@ -16,7 +21,7 @@ class LabDeployStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         
         # stack
-        stack = cdk.Stack.of(self)
+        stack = aws_cdk.Stack.of(self)
         
         # vpc = ec2.Vpc(self, "labtvpc", max_azs=3)     # default is all AZs in region
         vpc = ec2.Vpc(self, "labvpc",
@@ -77,7 +82,7 @@ class LabDeployStack(Stack):
             allow_all_outbound=True
         )
 
-        subnet_group = ec.CfnSubnetGroup(
+        subnet_group = ec2.CfnSubnetGroup(
             self,
             'cdklab-redis-subnets',
             subnet_ids=[sub.subnet_id for sub in vpc.isolated_subnets],
@@ -85,12 +90,12 @@ class LabDeployStack(Stack):
             description="cdklab message queue"
         )
 
-        self.redis = ec.CfnReplicationGroup(
+        self.redis = ec2.CfnReplicationGroup(
             self,
             'cdklab-redis',
             replication_group_id=f"{stack.stack_name}-redis",
             replication_group_description="cdklab redis",
-            cache_node_type=config['cdklab'].get('redis_instance_type', 'cache.t4g.micro'),
+            cache_node_type=app_config['cdklab'].get('redis_instance_type', 'cache.t4g.micro'),
             cache_parameter_group_name="default.redis7",
             engine="redis",
             engine_version="7.0",
@@ -138,7 +143,7 @@ class LabDeployStack(Stack):
         self.postgres = RDSComponent(
             self,
             "database",
-            config=config["cdklab"]["database"],
+            config=app_config["cdklab"]["database"],
             vpc=vpc,
             ecs_task_role=self.ecs_task_role
         )
@@ -146,21 +151,21 @@ class LabDeployStack(Stack):
        
         # common secrets across container created externally
         common_secret_map = {}
-        for item in config['cdklab']['common']['environment'].get('secret', []):
+        for item in app_config['cdklab']['common']['environment'].get('secret', []):
             secret = asm.Secret.from_secret_complete_arn(self, f"secret-{item['name']}", secret_complete_arn=item['arn'])
             secret.grant_read(self.ecs_task_role)
             for key, path in item['mapping'].items():
                 common_secret_map[key] = ecs.Secret.from_secrets_manager(secret, field=path)
 
         # common 
-        common_env_map = config['cdklab']['common']['environment'].get('plaintext', {})
+        common_env_map = app_config['cdklab']['common']['environment'].get('plaintext', {})
 
         # Add redis URL to comman environment variable map
         common_env_map["CELERY_BROKER_URL"] = f"rediss://{self.redis.attr_primary_end_point_address}:{self.redis.attr_primary_end_point_port}/0?ssl_cert_reqs=required"
         common_env_map["CELERY_RESULT_BACKEND"] = common_env_map["CELERY_BROKER_URL"]
 
         # lab repos
-        image_repo = ecr.Repository.from_repository_arn(self, 'ecr', config['cdklab']['ecr'])
+        image_repo = ecr.Repository.from_repository_arn(self, 'ecr', app_config['cdklab']['ecr'])
 
         # ecs cluster
         self.cluster = ecs.Cluster(
@@ -175,15 +180,15 @@ class LabDeployStack(Stack):
         # service
         self.fastapi = EcsComponents(self,
             "fastapi",
-            config=config["cdklab"]["fastapi"],
+            config=app_config["cdklab"]["fastapi"],
             image_repo=image_repo,
             vpc=vpc,
             ecs_task_role=self.ecs_task_role,
             database=self.postgres.database,
             cluster=self.cluster,
             alb=True,
-            container_port=config["cdklab"]["fastapi"]["container_port"],
-            health_check_path=config["cdklab"]["fastapi"]["health_check_path"],
+            container_port=app_config["cdklab"]["fastapi"]["container_port"],
+            health_check_path=app_config["cdklab"]["fastapi"]["health_check_path"],
             secrets_map=common_secret_map | self.postgres.secret_map,
             env_map=common_env_map | self.postgres.plaintext_env_map,
             redis_security_group=self.redis_security_group,
@@ -192,7 +197,7 @@ class LabDeployStack(Stack):
         # celery worker
         self.celery_task = EcsComponents(self,
             "celery",
-            config=config["cdklab"]["celery"],
+            config=app_config["cdklab"]["celery"],
             image_repo=image_repo,
             vpc=vpc,
             ecs_task_role=self.ecs_task_role,
@@ -207,14 +212,14 @@ class LabDeployStack(Stack):
         # flower
         self.flower = EcsComponents(self,
             "flower",
-            config=config["cdklab"]["flower"],
+            config=app_config["cdklab"]["flower"],
             image_repo=image_repo,
             vpc=vpc,
             ecs_task_role=self.ecs_task_role,
             cluster=self.cluster,
             alb=True,
-            container_port=config["cdklab"]["flower"]["container_port"],
-            health_check_path=config["cdklab"]["flower"]["health_check_path"],
+            container_port=app_config["cdklab"]["flower"]["container_port"],
+            health_check_path=app_config["cdklab"]["flower"]["health_check_path"],
             secrets_map=common_secret_map | self.postgres.secret_map,
             env_map=common_env_map | self.postgres.plaintext_env_map,
             redis_security_group=self.redis_security_group,

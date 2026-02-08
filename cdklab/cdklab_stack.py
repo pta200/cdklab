@@ -7,6 +7,7 @@ from aws_cdk import (
     aws_elasticloadbalancingv2 as elb,
     # aws_ecs_patterns as ecs_patterns,
     aws_secretsmanager as asm,
+    aws_elasticache as el,
     aws_iam as iam,
     CfnOutput,
 )
@@ -82,7 +83,7 @@ class LabDeployStack(Stack):
             allow_all_outbound=True
         )
 
-        subnet_group = ec2.CfnSubnetGroup(
+        subnet_group = el.CfnSubnetGroup(
             self,
             'cdklab-redis-subnets',
             subnet_ids=[sub.subnet_id for sub in vpc.isolated_subnets],
@@ -90,7 +91,7 @@ class LabDeployStack(Stack):
             description="cdklab message queue"
         )
 
-        self.redis = ec2.CfnReplicationGroup(
+        self.redis = el.CfnReplicationGroup(
             self,
             'cdklab-redis',
             replication_group_id=f"{stack.stack_name}-redis",
@@ -238,7 +239,7 @@ class LabDeployStack(Stack):
             self, 
             "lb",
             vpc=vpc,
-            internet_facing=False,
+            internet_facing=True,
         )
 
         # create alb listner 

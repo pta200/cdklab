@@ -110,7 +110,8 @@ class EcsComponents(constructs.Construct):
             circuit_breaker=ecs.DeploymentCircuitBreaker(
                 enable=True,
                 rollback=True,
-            )
+            ),
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
         )
 
         # allow access to redis

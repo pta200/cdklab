@@ -24,7 +24,7 @@ class LabDeployStack(Stack):
         # stack
         stack = aws_cdk.Stack.of(self)
         
-        # vpc = ec2.Vpc(self, "labtvpc", max_azs=3)     # default is all AZs in region
+        # vpc = ec2.Vpc(self, "labvpc", max_azs=3)     # default is all AZs in region
         vpc = ec2.Vpc(self, "labvpc",
             max_azs=2,  # Multi-AZ for high availability
             subnet_configuration=[
@@ -45,31 +45,6 @@ class LabDeployStack(Stack):
                 )
             ]
         )
-
-        # cluster = ecs.Cluster(self, "labcluster", vpc=vpc)
-
-        # fargate_service = ecs_patterns.ApplicationLoadBalancedFargateService(self, "lab",
-        #     cluster=cluster,            # Required
-        #     cpu=512,                    # Default is 256
-        #     desired_count=1,            # Default is 1
-        #     task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
-        #         image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample")),
-        #     memory_limit_mib=1024,      # Default is 512
-        #     public_load_balancer=True)  # Default is True
-        
-        # CfnOutput(
-        #     self, "LoadBalancerDNS",
-        #     value=fargate_service.load_balancer.load_balancer_dns_name,
-        #     description="The DNS name of the load balancer"
-        # )
-
-                # # DNS setup
-        # hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
-        #     self,
-        #     "zone",
-        #     hosted_zone_id=config['dns']['hosted_zone']['id'],
-        #     zone_name=config['dns']['hosted_zone']['name']
-        # )
 
         # # domain name
         # domain_name = f'{config.get("cdklab").get("hostname")}.{config.get("dns").get("hostname_suffix", "")}.{hosted_zone.zone_name}'
@@ -262,7 +237,7 @@ class LabDeployStack(Stack):
             "listner_action",
             priority=10,
             conditions=[
-                elb.ListenerCondition.path_patterns(["/docs", "/health", "/v1/*", "/openapi.json"])
+                elb.ListenerCondition.path_patterns(app_config["cdklab"]["fastapi"]["path_patterns"])
             ],
             action=elb.ListenerAction.forward(
                 target_groups=[self.fastapi.target_group]
@@ -277,4 +252,10 @@ class LabDeployStack(Stack):
         #     record_name=domain_name,
         #     target=route53.RecordTarget.from_alias(r53t.LoadBalancerTarget(self.lb))
         # )
+
+        CfnOutput(
+            self, "LoadBalancerDNS",
+            value=self.lb.load_balancer.load_balancer_dns_name,
+            description="The DNS name of the load balancer"
+        )
 
